@@ -16,7 +16,6 @@ def validate_group_data(data: dict) -> tuple[bool, str]:
     return True, ""
 
 def get_course_number(admission_year: int) -> int | None:
-    """Расчет номера курса"""
     current_date = date.today()
     current_year = current_date.year
     current_month = current_date.month
@@ -33,7 +32,6 @@ def get_course_number(admission_year: int) -> int | None:
 
 def create_group(**data):
     try:
-        # Валидация
         is_valid, error = validate_group_data(data)
         if not is_valid:
             return None
