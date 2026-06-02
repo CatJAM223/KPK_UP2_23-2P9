@@ -1,0 +1,4 @@
+peewee
+PyJWT
+cryptography
+bcrypt
