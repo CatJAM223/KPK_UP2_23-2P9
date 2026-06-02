@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 from fastapi import Query
-from typing import Optional, Literal, List, Any
+from typing import Optional, Literal, List
+from app.models.models import Group
 
 class CreateGroup(BaseModel):
     year_create: int = Field(..., ge=2000)
@@ -8,43 +9,44 @@ class CreateGroup(BaseModel):
     prefix: str
     code: str = Field(pattern=r'^\d{2}\.\d{2}\.\d{2}$')
     class_number: Literal[9, 11]
-    tutor_id: Optional[int] = None
+    tutor_id: Optional[int] = 0
+    
+    
+class PatchGroup(BaseModel):
+    tutor_id: int
 
-class UpdateGroup(BaseModel):
-    year_create: Optional[int] = Field(None, ge=2000)
-    number: Optional[int] = Field(None, ge=1)
-    prefix: Optional[str] = None
-    code: Optional[str] = Field(None, pattern=r'^\d{2}\.\d{2}\.\d{2}$')
-    class_number: Optional[Literal[9, 11]] = None
-    tutor_id: Optional[int] = None
-
-class GroupResponse(BaseModel):
+class Groups(BaseModel):
     id: int
+    name: str
+
+class Base(BaseModel):
     year_create: int
     number: int     
     prefix: str  
-    code: str
-    class_number: int
-    tutor_id: Optional[int] = None
+    code: str = Field(pattern=r'^\d{2}\.\d{2}\.\d{2}$')
+    class_number: Literal[9, 11]
+    tutor_id: Optional[int] = 0
     name: str            
     count_student: int     
     students: List[int] = []
     
     @classmethod
-    def from_group_with_students(cls, group, students: List[int]):
+    def group_to_base(cls, group: Group, group_name: str = None):
+        if group_name is None:
+            group_name = group.name
+    
         return cls(
-            id=group.id,
             year_create=group.year_create,
             number=group.number,
             prefix=group.prefix,
             code=group.code,
             class_number=group.class_number,
             tutor_id=group.tutor_id,
-            name=group.name,
-            count_student=len(students),
-            students=students
-        )
-
+            name=group_name,
+            count_student=group.count_student,
+            students=[s.id_student for s in group.students]
+    )   
+    
 class GroupFilter(BaseModel):
     course_enumeration: Optional[int] = None
     course_minimum_value: Optional[int] = None
@@ -81,7 +83,7 @@ class GroupFilter(BaseModel):
         count_student_minimum_value: Optional[int] = Query(None),
         count_student_maximum_value: Optional[int] = Query(None),
         prefix: Optional[str] = Query(None),
-        code: Optional[str] = Query(None, pattern=r'^\d{2}\.\d{2}\.\d{2}$'),
+        code: Optional[str] = Query(None, regex=r'^\d{2}\.\d{2}\.\d{2}$'),
         class_number: Optional[int] = Query(None),
         tutor_id: Optional[int] = Query(None),
     ):
