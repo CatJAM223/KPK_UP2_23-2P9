@@ -46,12 +46,10 @@ def update_group(group_id: int, update_data: dict):
     except DoesNotExist:
         return None
     
-    # Валидация обновляемых полей
     is_valid, error = validate_group_data(update_data)
     if not is_valid:
         return None
     
-    # Проверка уникальности при изменении ключевых полей
     if any(field in update_data for field in ['year_create', 'number', 'prefix', 'class_number']):
         new_values = {
             'year_create': update_data.get('year_create', group.year_create),
