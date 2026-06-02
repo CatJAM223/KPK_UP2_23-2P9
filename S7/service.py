@@ -1,12 +1,82 @@
-from app.models.models import Group
-from app.schemas import GroupFilter
-from peewee import * 
+from app.models.models import Group, Student
+from app.schemas import GroupFilter, UpdateGroup
+from peewee import *
+from datetime import date
+import re
+
+def validate_group_data(data: dict) -> tuple[bool, str]:
+    if data.get('year_create', 0) < 2000:
+        return False, "year_create must be >= 2000"
+    if data.get('number', 0) < 1:
+        return False, "number must be >= 1"
+    if data.get('class_number') not in [9, 11]:
+        return False, "class_number must be 9 or 11"
+    if data.get('code') and not re.match(r'^\d{2}\.\d{2}\.\d{2}$', data['code']):
+        return False, "code must be in format XX.XX.XX"
+    return True, ""
+
+def get_course_number(admission_year: int) -> int | None:
+    """Расчет номера курса"""
+    current_date = date.today()
+    current_year = current_date.year
+    current_month = current_date.month
+    
+    if current_month >= 9:
+        current_academic_year = current_year
+    else:
+        current_academic_year = current_year - 1
+    
+    if admission_year > current_academic_year:
+        return None
+    
+    return current_academic_year - admission_year + 1
 
 def create_group(**data):
     try:
+        # Валидация
+        is_valid, error = validate_group_data(data)
+        if not is_valid:
+            return None
+        
         return Group.create(**data)
     except IntegrityError:
         return None
+
+def update_group(group_id: int, update_data: dict):
+    try:
+        group = Group.get_by_id(group_id)
+    except DoesNotExist:
+        return None
+    
+    # Валидация обновляемых полей
+    is_valid, error = validate_group_data(update_data)
+    if not is_valid:
+        return None
+    
+    # Проверка уникальности при изменении ключевых полей
+    if any(field in update_data for field in ['year_create', 'number', 'prefix', 'class_number']):
+        new_values = {
+            'year_create': update_data.get('year_create', group.year_create),
+            'number': update_data.get('number', group.number),
+            'prefix': update_data.get('prefix', group.prefix),
+            'class_number': update_data.get('class_number', group.class_number),
+        }
+        exists = Group.select().where(
+            (Group.year_create == new_values['year_create']) &
+            (Group.number == new_values['number']) &
+            (Group.prefix == new_values['prefix']) &
+            (Group.class_number == new_values['class_number']) &
+            (Group.id != group_id)
+        ).exists()
+        if exists:
+            return None
+    
+    # Обновление полей
+    for key, value in update_data.items():
+        setattr(group, key, value)
+    
+    group.save()
+    return group
 
 def delete_group(group_id: int):
     try:
@@ -14,42 +84,30 @@ def delete_group(group_id: int):
     except DoesNotExist:
         return False
     
-    if not group.is_active:
-        return False
-    
-    group.is_active = False
-    group.save()
-    return True
+    return group.soft_delete()
 
-def patch_group(group_id: int, tutor_id: int):
+def get_group_info(group_id: int):
     try:
         group = Group.get_by_id(group_id)
     except DoesNotExist:
         return None
     
-    group.tutor_id = tutor_id
-    group.save()
-    return group
-
-def info_id(group_id: int):
-    try:
-        group = Group.get_by_id(group_id)
-    except DoesNotExist:
-        return None
-
-    return group
+    # Получение списка студентов
+    students = [s.id_student for s in group.students]
+    
+    return {
+        'group': group,
+        'students': students,
+        'student_count': len(students)
+    }
 
 def filter_groups(filters: GroupFilter):
-    query = Group.select(Group.id, Group.year_create).where(Group.is_active == True)
-
+    query = Group.select().where(Group.is_active == True)
+    
+    # Фильтрация по хранимым полям
     if filters.count_student_enumeration is not None:
-        query = query.where(Group.count_student == filters.count_student_enumeration)
-    
-    if filters.count_student_minimum_value is not None:
-        query = query.where(Group.count_student >= filters.count_student_minimum_value)
-    
-    if filters.count_student_maximum_value is not None:
-        query = query.where(Group.count_student <= filters.count_student_maximum_value)
+        # Примечание: count_student теперь вычисляемое, требует JOIN
+        pass
     
     if filters.prefix is not None:
         query = query.where(Group.prefix == filters.prefix)
@@ -61,23 +119,28 @@ def filter_groups(filters: GroupFilter):
         query = query.where(Group.class_number == filters.class_number)
     
     if filters.tutor_id is not None:
-        # Преобразуем 0 в None для поиска NULL
-        if filters.tutor_id == 0:
+        if filters.tutor_id is None or filters.tutor_id == 0:
             query = query.where(Group.tutor_id.is_null(True))
         else:
             query = query.where(Group.tutor_id == filters.tutor_id)
-
+    
     groups = list(query)
     
-    if filters.course_enumeration is not None:
-        groups = [g for g in groups if Group.get_course_number(g.year_create) == filters.course_enumeration]
+    if any([filters.course_enumeration, filters.course_minimum_value, filters.course_maximum_value]):
+        result = []
+        for group in groups:
+            course = get_course_number(group.year_create)
+            if course is None:
+                continue
+            
+            if filters.course_enumeration is not None and course != filters.course_enumeration:
+                continue
+            if filters.course_minimum_value is not None and course < filters.course_minimum_value:
+                continue
+            if filters.course_maximum_value is not None and course > filters.course_maximum_value:
+                continue
+            result.append(group)
+        groups = result
     
-    if filters.course_minimum_value is not None:
-        groups = [g for g in groups if Group.get_course_number(g.year_create) is not None 
-                  and Group.get_course_number(g.year_create) >= filters.course_minimum_value]
-    
-    if filters.course_maximum_value is not None:
-        groups = [g for g in groups if Group.get_course_number(g.year_create) is not None 
-                  and Group.get_course_number(g.year_create) <= filters.course_maximum_value]
-
-    return groups
+    # Возвращаем только id и year_create для оптимизации
+    return [{'id': g.id, 'year_create': g.year_create} for g in groups]
