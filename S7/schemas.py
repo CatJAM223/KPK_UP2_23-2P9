@@ -11,7 +11,6 @@ class CreateGroup(BaseModel):
     tutor_id: Optional[int] = None
 
 class UpdateGroup(BaseModel):
-    """Схема для обновления группы (все поля необязательные)"""
     year_create: Optional[int] = Field(None, ge=2000)
     number: Optional[int] = Field(None, ge=1)
     prefix: Optional[str] = None
