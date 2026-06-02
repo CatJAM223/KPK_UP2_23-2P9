@@ -67,7 +67,6 @@ def update_group(group_id: int, update_data: dict):
         if exists:
             return None
     
-    # Обновление полей
     for key, value in update_data.items():
         setattr(group, key, value)
     
@@ -100,7 +99,6 @@ def get_group_info(group_id: int):
 def filter_groups(filters: GroupFilter):
     query = Group.select().where(Group.is_active == True)
     
-    # Фильтрация по хранимым полям
     if filters.count_student_enumeration is not None:
         # Примечание: count_student теперь вычисляемое, требует JOIN
         pass
