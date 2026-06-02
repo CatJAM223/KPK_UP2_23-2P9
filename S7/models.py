@@ -27,18 +27,9 @@ class Group(BaseModel):
     
     @property
     def name(self) -> str:
-        """Вычисляемое наименование группы"""
         from app.services import get_course_number
         course = get_course_number(self.year_create)
         return f"{course}-{self.number}{self.prefix}{self.class_number}"
-    
-    def soft_delete(self) -> bool:
-        """Мягкое удаление группы"""
-        if not self.is_active:
-            return False
-        self.is_active = False
-        self.save()
-        return True
 
 class Student(BaseModel):
     id_student = IntegerField(primary_key=True, unique=True)
@@ -52,3 +43,5 @@ def create_tables():
 
 if __name__ == '__main__':
     create_tables()
+
+#валидация полей бд происходит в файле schemas
