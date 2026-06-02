@@ -140,5 +140,4 @@ def filter_groups(filters: GroupFilter):
             result.append(group)
         groups = result
     
-    # Возвращаем только id и year_create для оптимизации
     return [{'id': g.id, 'year_create': g.year_create} for g in groups]
