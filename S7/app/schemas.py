@@ -9,8 +9,7 @@ class CreateGroup(BaseModel):
     prefix: str
     code: str = Field(pattern=r'^\d{2}\.\d{2}\.\d{2}$')
     class_number: Literal[9, 11]
-    tutor_id: Optional[int] = 0
-    
+    tutor_id: Optional[int] = None
     
 class PatchGroup(BaseModel):
     tutor_id: int
@@ -19,19 +18,19 @@ class Groups(BaseModel):
     id: int
     name: str
 
-class Base(BaseModel):
+class GroupResponse(BaseModel):
     year_create: int
     number: int     
     prefix: str  
     code: str = Field(pattern=r'^\d{2}\.\d{2}\.\d{2}$')
     class_number: Literal[9, 11]
-    tutor_id: Optional[int] = 0
+    tutor_id: Optional[int] = None
     name: str            
     count_student: int     
     students: List[int] = []
     
     @classmethod
-    def group_to_base(cls, group: Group, group_name: str = None):
+    def group_to_response(cls, group: Group, group_name: str = None):
         if group_name is None:
             group_name = group.name
     
@@ -45,7 +44,7 @@ class Base(BaseModel):
             name=group_name,
             count_student=group.count_student,
             students=[s.id_student for s in group.students]
-    )   
+        )   
     
 class GroupFilter(BaseModel):
     course_enumeration: Optional[int] = None
@@ -83,7 +82,7 @@ class GroupFilter(BaseModel):
         count_student_minimum_value: Optional[int] = Query(None),
         count_student_maximum_value: Optional[int] = Query(None),
         prefix: Optional[str] = Query(None),
-        code: Optional[str] = Query(None, regex=r'^\d{2}\.\d{2}\.\d{2}$'),
+        code: Optional[str] = Query(None, pattern=r'^\d{2}\.\d{2}\.\d{2}$'),
         class_number: Optional[int] = Query(None),
         tutor_id: Optional[int] = Query(None),
     ):

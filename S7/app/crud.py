@@ -12,7 +12,10 @@ def delete_group(group_id: int):
     try:
         group = Group.get_by_id(group_id)
     except DoesNotExist:
-        return False 
+        return False
+    
+    if not group.is_active:
+        return False
     
     group.is_active = False
     group.save()
@@ -22,35 +25,34 @@ def patch_group(group_id: int, tutor_id: int):
     try:
         group = Group.get_by_id(group_id)
     except DoesNotExist:
-        return False
+        return None
     
     group.tutor_id = tutor_id
     group.save()
-    return group, group.name
+    return group
 
 def info_id(group_id: int):
     try:
         group = Group.get_by_id(group_id)
     except DoesNotExist:
-        return False
+        return None
 
-    return group, group.name
+    return group
 
 def filter_groups(filters: GroupFilter):
-        
-    query = Group.select(Group.id, Group.year_create)
+    query = Group.select(Group.id, Group.year_create).where(Group.is_active == True)
 
     if filters.count_student_enumeration is not None:
-        query = query.where(Group.student_count == filters.count_student_enumeration)
+        query = query.where(Group.count_student == filters.count_student_enumeration)
     
     if filters.count_student_minimum_value is not None:
-        query = query.where(Group.student_count >= filters.count_student_minimum_value)
+        query = query.where(Group.count_student >= filters.count_student_minimum_value)
     
     if filters.count_student_maximum_value is not None:
-        query = query.where(Group.student_count <= filters.count_student_maximum_value)
+        query = query.where(Group.count_student <= filters.count_student_maximum_value)
     
     if filters.prefix is not None:
-        query = query.where(Group.prefix.contains(filters.prefix))
+        query = query.where(Group.prefix == filters.prefix)
     
     if filters.code is not None:
         query = query.where(Group.code == filters.code)
@@ -59,7 +61,11 @@ def filter_groups(filters: GroupFilter):
         query = query.where(Group.class_number == filters.class_number)
     
     if filters.tutor_id is not None:
-        query = query.where(Group.tutor_id == filters.tutor_id)
+        # Преобразуем 0 в None для поиска NULL
+        if filters.tutor_id == 0:
+            query = query.where(Group.tutor_id.is_null(True))
+        else:
+            query = query.where(Group.tutor_id == filters.tutor_id)
 
     groups = list(query)
     
@@ -67,9 +73,11 @@ def filter_groups(filters: GroupFilter):
         groups = [g for g in groups if Group.get_course_number(g.year_create) == filters.course_enumeration]
     
     if filters.course_minimum_value is not None:
-        groups = [g for g in groups if Group.get_course_number(g.year_create) is not None and Group.get_course_number(g.year_create) >= filters.course_minimum_value]
+        groups = [g for g in groups if Group.get_course_number(g.year_create) is not None 
+                  and Group.get_course_number(g.year_create) >= filters.course_minimum_value]
     
     if filters.course_maximum_value is not None:
-        groups = [g for g in groups if Group.get_course_number(g.year_create) is not None and Group.get_course_number(g.year_create) <= filters.course_maximum_value]
+        groups = [g for g in groups if Group.get_course_number(g.year_create) is not None 
+                  and Group.get_course_number(g.year_create) <= filters.course_maximum_value]
 
     return groups
