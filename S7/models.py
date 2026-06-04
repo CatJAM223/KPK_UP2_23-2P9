@@ -25,3 +25,6 @@ class Student(BaseModel):
 def init_db():
     """Функция для создания таблиц"""
     db.create_tables([Group, Student])
+
+if __name__ == "__main__":
+    init_db()
