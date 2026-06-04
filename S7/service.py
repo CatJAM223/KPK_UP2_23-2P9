@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Literal, List
 from contextlib import contextmanager
 from app.models import Group, Student, db
 from datetime import date
+
+app = FastAPI()
 
 # ==================== DATABASE CONNECTION ====================
 
@@ -15,6 +17,33 @@ def get_db():
     finally:
         db.close()
 
+# ==================== BUSINESS LOGIC FUNCTIONS ====================
+
+def get_course_number(admission_year: int) -> Optional[int]:
+    """Вычисление номера курса"""
+    current_date = date.today()
+    current_year = current_date.year
+    current_month = current_date.month
+    
+    if current_month >= 9:
+        current_academic_year = current_year
+    else:
+        current_academic_year = current_year - 1
+    
+    if admission_year > current_academic_year:
+        return None
+    
+    return current_academic_year - admission_year + 1
+
+def get_group_name(group: Group) -> str:
+    """Формирование имени группы"""
+    course = get_course_number(group.year_create)
+    return f"{course}-{group.number}{group.prefix}{group.class_number}"
+
+def get_count_student(group: Group) -> int:
+    """Подсчет количества студентов"""
+    return group.students.count()
+
 # ==================== SCHEMAS ====================
 
 class CreateGroup(BaseModel):
@@ -25,21 +54,6 @@ class CreateGroup(BaseModel):
     class_number: Literal[9, 11]
     tutor_id: Optional[int] = None
 
-    @model_validator(mode='after')
-    def validate_unique_combination(self):
-        """Валидация уникальности комбинации полей"""
-        with db:
-            exists = Group.select().where(
-                Group.year_create == self.year_create,
-                Group.number == self.number,
-                Group.prefix == self.prefix,
-                Group.class_number == self.class_number,
-                Group.is_active == True
-            ).exists()
-        if exists:
-            raise ValueError('Group with this combination already exists')
-        return self
-
 class PatchGroup(BaseModel):
     year_create: Optional[int] = Field(None, ge=2000)
     number: Optional[int] = Field(None, ge=1)
@@ -47,32 +61,6 @@ class PatchGroup(BaseModel):
     code: Optional[str] = Field(None, pattern=r'^\d{2}\.\d{2}\.\d{2}$')
     class_number: Optional[Literal[9, 11]] = None
     tutor_id: Optional[int] = None
-
-    @model_validator(mode='after')
-    def validate_unique_combination(self):
-        """Валидация уникальности при частичном обновлении"""
-        # Проверяем, что есть хотя бы одно поле для обновления
-        if not any([self.year_create, self.number, self.prefix, 
-                   self.code, self.class_number, self.tutor_id]):
-            return self
-        
-        # Для уникальности нужны все 4 поля, поэтому если не все указаны,
-        # валидацию пропускаем (будет проверка в БД)
-        if self.year_create is None or self.number is None or \
-           self.prefix is None or self.class_number is None:
-            return self
-            
-        with db:
-            exists = Group.select().where(
-                Group.year_create == self.year_create,
-                Group.number == self.number,
-                Group.prefix == self.prefix,
-                Group.class_number == self.class_number,
-                Group.is_active == True
-            ).exists()
-        if exists:
-            raise ValueError('Group with this combination already exists')
-        return self
 
 class GroupResponse(BaseModel):
     id: int
@@ -98,7 +86,7 @@ class GroupFilter(BaseModel):
     count_student_minimum_value: Optional[int] = None
     count_student_maximum_value: Optional[int] = None
     prefix: Optional[str] = None
-    code: Optional[str] = Field(None, pattern=r'^\d{2}\.\d{2}\.\d{2}$')
+    code: Optional[str] = None
     class_number: Optional[int] = None
     tutor_id: Optional[int] = None
 
@@ -107,81 +95,59 @@ class GroupFilter(BaseModel):
     def validate_class_number(cls, v):
         if v is None:
             return None
-        if isinstance(v, str):
-            try:
-                v = int(v)
-            except ValueError:
-                raise ValueError('class_number должен быть числом')
         if v not in [9, 11]:
             raise ValueError(f'class_number должен быть 9 или 11, получено: {v}')
         return v
 
+    @field_validator('code')
     @classmethod
-    def query_params(
-        cls,
-        course_enumeration: Optional[int] = Query(None),
-        course_minimum_value: Optional[int] = Query(None),
-        course_maximum_value: Optional[int] = Query(None),
-        count_student_enumeration: Optional[int] = Query(None),
-        count_student_minimum_value: Optional[int] = Query(None),
-        count_student_maximum_value: Optional[int] = Query(None),
-        prefix: Optional[str] = Query(None),
-        code: Optional[str] = Query(None, regex=r'^\d{2}\.\d{2}\.\d{2}$'),
-        class_number: Optional[int] = Query(None),
-        tutor_id: Optional[int] = Query(None),
-    ):
-        return cls(
-            course_enumeration=course_enumeration,
-            course_minimum_value=course_minimum_value,
-            course_maximum_value=course_maximum_value,
-            count_student_enumeration=count_student_enumeration,
-            count_student_minimum_value=count_student_minimum_value,
-            count_student_maximum_value=count_student_maximum_value,
-            prefix=prefix,
-            code=code,
-            class_number=class_number,
-            tutor_id=tutor_id,
-        )
-
-# ==================== BUSINESS LOGIC ====================
-
-def get_course_number(admission_year):
-    """Вычисление номера курса"""
-    current_date = date.today()
-    current_year = current_date.year
-    current_month = current_date.month
-    
-    if current_month >= 9:
-        current_academic_year = current_year
-    else:
-        current_academic_year = current_year - 1
-    if admission_year > current_academic_year:
-        return None
-    
-    course = current_academic_year - admission_year + 1
-    return course
-
-def get_group_name(group):
-    """Формирование имени группы"""
-    course = get_course_number(group.year_create)
-    return f"{course}-{group.number}{group.prefix}{group.class_number}"
-
-def get_count_student(group):
-    """Подсчет количества студентов"""
-    return group.students.count()
+    def validate_code(cls, v):
+        if v is None:
+            return None
+        import re
+        if not re.match(r'^\d{2}\.\d{2}\.\d{2}$', v):
+            raise ValueError('code должен быть в формате XX.XX.XX')
+        return v
 
 # ==================== CRUD OPERATIONS ====================
 
-def create_group(**data):
+def check_unique_combination(db, year_create: int, number: int, prefix: str, class_number: int, exclude_id: Optional[int] = None) -> bool:
+    """Проверка уникальности комбинации полей"""
+    query = Group.select().where(
+        Group.year_create == year_create,
+        Group.number == number,
+        Group.prefix == prefix,
+        Group.class_number == class_number,
+        Group.is_active == True
+    )
+    if exclude_id:
+        query = query.where(Group.id != exclude_id)
+    return query.exists()
+
+def create_group(db, **data):
+    """Создание группы с проверкой уникальности"""
+    if check_unique_combination(db, data['year_create'], data['number'], data['prefix'], data['class_number']):
+        return None
+    
     try:
         return Group.create(**data)
     except IntegrityError:
         return None
 
-def update_group(group_id: int, **data):
+def update_group(db, group_id: int, **data):
+    """Обновление группы с проверкой уникальности"""
     try:
         group = Group.get_by_id(group_id)
     except DoesNotExist:
+        return None
+    
+    # Проверяем уникальность только если изменяются ключевые поля
+    year_create = data.get('year_create', group.year_create)
+    number = data.get('number', group.number)
+    prefix = data.get('prefix', group.prefix)
+    class_number = data.get('class_number', group.class_number)
+    
+    if check_unique_combination(db, year_create, number, prefix, class_number, group_id):
         return None
     
     for key, value in data.items():
@@ -194,26 +160,28 @@ def update_group(group_id: int, **data):
         return None
 
 def delete_group(group_id: int):
+    """Мягкое удаление группы"""
     try:
         group = Group.get_by_id(group_id)
+        group.is_active = False
+        group.save()
+        return True
     except DoesNotExist:
-        return False 
-    
-    group.is_active = False
-    group.save()
-    return True
+        return False
 
 def get_group_by_id(group_id: int):
+    """Получение группы по ID"""
     try:
         return Group.get_by_id(group_id)
     except DoesNotExist:
         return None
 
 def filter_groups_db(filters: GroupFilter):
+    """Фильтрация групп с оптимизацией запросов"""
     # Базовый запрос только активных групп
     query = Group.select().where(Group.is_active == True)
     
-    # Применяем фильтры к БД
+    # Применяем фильтры, которые можно выполнить на уровне БД
     if filters.prefix is not None:
         query = query.where(Group.prefix.contains(filters.prefix))
     
@@ -226,10 +194,10 @@ def filter_groups_db(filters: GroupFilter):
     if filters.tutor_id is not None:
         query = query.where(Group.tutor_id == filters.tutor_id)
     
-    # Получаем все группы после базовых фильтров
+    # Получаем группы после базовых фильтров
     groups = list(query)
     
-    # Фильтрация по вычисляемым полям
+    # Фильтрация по вычисляемым полям (курс)
     if filters.course_enumeration is not None:
         groups = [g for g in groups if get_course_number(g.year_create) == filters.course_enumeration]
     
@@ -241,6 +209,7 @@ def filter_groups_db(filters: GroupFilter):
         groups = [g for g in groups if get_course_number(g.year_create) is not None and 
                  get_course_number(g.year_create) <= filters.course_maximum_value]
     
+    # Фильтрация по количеству студентов (вычисляемое поле)
     if filters.count_student_enumeration is not None:
         groups = [g for g in groups if get_count_student(g) == filters.count_student_enumeration]
     
@@ -252,16 +221,16 @@ def filter_groups_db(filters: GroupFilter):
     
     return groups
 
-# ==================== FASTAPI APP ====================
-
-app = FastAPI()
+# ==================== API ENDPOINTS ====================
 
 @app.post('/groups', response_model=GroupResponse)
 def create_group_endpoint(group: CreateGroup, db=Depends(get_db)):
+    """Создание новой группы"""
     try:
-        result = create_group(**group.model_dump())
+        # Бизнес-логика проверки уникальности
+        result = create_group(db, **group.model_dump())
         if result is None:
-            raise HTTPException(status_code=409, detail="Group already exists")
+            raise HTTPException(status_code=409, detail="Group with this combination already exists")
         
         return GroupResponse(
             id=result.id,
@@ -275,25 +244,28 @@ def create_group_endpoint(group: CreateGroup, db=Depends(get_db)):
             count_student=get_count_student(result),
             students=[s.id_student for s in result.students]
         )
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.patch('/groups/{group_id}', response_model=GroupResponse)
 def patch_group_endpoint(group_id: int, group: PatchGroup, db=Depends(get_db)):
+    """Частичное обновление группы"""
     update_data = {k: v for k, v in group.model_dump().items() if v is not None}
     
     if not update_data:
-        raise HTTPException(400, detail="No fields to update")
+        raise HTTPException(status_code=400, detail="No fields to update")
     
-    result = update_group(group_id, **update_data)
+    # Проверяем существование группы
+    existing = get_group_by_id(group_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    # Бизнес-логика обновления с проверкой уникальности
+    result = update_group(db, group_id, **update_data)
     if result is None:
-        existing = get_group_by_id(group_id)
-        if existing is None:
-            raise HTTPException(404, detail="Group not found")
-        else:
-            raise HTTPException(409, detail="Group with this combination already exists")
+        raise HTTPException(status_code=409, detail="Group with this combination already exists")
     
     return GroupResponse(
         id=result.id,
@@ -310,14 +282,18 @@ def patch_group_endpoint(group_id: int, group: PatchGroup, db=Depends(get_db)):
 
 @app.delete('/groups/{group_id}')
 def delete_group_endpoint(group_id: int, db=Depends(get_db)):
+    """Мягкое удаление группы"""
     result = delete_group(group_id)
-    return {"success": result}
+    if not result:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return {"success": True}
 
 @app.get('/groups/{group_id}', response_model=GroupResponse)
 def info_id_endpoint(group_id: int, db=Depends(get_db)):
+    """Получение полной информации о группе"""
     result = get_group_by_id(group_id)
     if result is None:
-        raise HTTPException(404, detail="Group not found")
+        raise HTTPException(status_code=404, detail="Group not found")
     
     return GroupResponse(
         id=result.id,
@@ -333,12 +309,32 @@ def info_id_endpoint(group_id: int, db=Depends(get_db)):
     )
     
 @app.get('/groups', response_model=List[GroupShortResponse])
-def filter_groups_endpoint(filters: GroupFilter = Depends(GroupFilter.query_params), db=Depends(get_db)):
+def filter_groups_endpoint(
+    course_enumeration: Optional[int] = Query(None),
+    course_minimum_value: Optional[int] = Query(None),
+    course_maximum_value: Optional[int] = Query(None),
+    count_student_enumeration: Optional[int] = Query(None),
+    count_student_minimum_value: Optional[int] = Query(None),
+    count_student_maximum_value: Optional[int] = Query(None),
+    prefix: Optional[str] = Query(None),
+    code: Optional[str] = Query(None, regex=r'^\d{2}\.\d{2}\.\d{2}$'),
+    class_number: Optional[int] = Query(None),
+    tutor_id: Optional[int] = Query(None),
+    db=Depends(get_db)
+):
+    """Получение списка групп с фильтрацией"""
+    filters = GroupFilter(
+        course_enumeration=course_enumeration,
+        course_minimum_value=course_minimum_value,
+        course_maximum_value=course_maximum_value,
+        count_student_enumeration=count_student_enumeration,
+        count_student_minimum_value=count_student_minimum_value,
+        count_student_maximum_value=count_student_maximum_value,
+        prefix=prefix,
+        code=code,
+        class_number=class_number,
+        tutor_id=tutor_id
+    )
+    
     groups = filter_groups_db(filters)
     return [GroupShortResponse(id=g.id, year_create=g.year_create) for g in groups]
-
-# ==================== RUN SERVER ====================
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
