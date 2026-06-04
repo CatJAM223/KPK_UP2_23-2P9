@@ -1,6 +1,4 @@
 from peewee import *
-from datetime import date, datetime
-import re
 
 db = SqliteDatabase('S7.db')
 
@@ -20,22 +18,10 @@ class Group(BaseModel):
     class Meta:
         indexes = ((('year_create', 'number', 'prefix', 'class_number'), True),)
 
-    @staticmethod
-    def get_course_number(admission_year):
-        current_date = date.today()
-        current_year = current_date.year
-        current_month = current_date.month
-        
-        if current_month >= 9:
-            current_academic_year = current_year
-        else:
-            current_academic_year = current_year - 1
-        if admission_year > current_academic_year:
-            return None
-        
-        course = current_academic_year - admission_year + 1
-        return course
-
 class Student(BaseModel):
-    id_student = PrimaryKeyField()  # Исправлено на PrimaryKeyField
+    id_student = AutoField()  # Исправлено: AutoField вместо PrimaryKeyField
     id_group = ForeignKeyField(Group, backref='students')
+
+def init_db():
+    """Функция для создания таблиц"""
+    db.create_tables([Group, Student])
